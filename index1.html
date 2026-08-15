@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plant Pest Identifier - Dashboard</title>
+  <!-- Tailwind CSS for styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- TensorFlow.js and Teachable Machine Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.3/dist/teachablemachine-image.min.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-6">
+  <div class="max-w-4xl mx-auto space-y-6">
+    
+    <!-- Header with School Logo -->
+    <header class="flex justify-between items-center border-b border-slate-700 pb-4">
+      <div>
+        <h1 class="text-2xl font-bold text-emerald-400">🌱 Plant Pest Monitor</h1>
+        <p class="text-slate-400 text-sm">Image Snapshot Analysis</p>
+      </div>
+
+      <!-- Top Right School Logo -->
+      <div class="flex items-center">
+        <img 
+          src="Tenby SEH_Logo_White Colour (1).png" 
+          alt="Tenby Schools Logo" 
+          class="h-12 md:h-16 object-contain"
+        />
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      
+      <!-- Photo Upload & Preview Box -->
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 flex flex-col items-center justify-center min-h-[320px]">
+        
+        <!-- Image Container -->
+        <div class="relative w-full h-64 bg-slate-950 rounded-lg overflow-hidden border border-slate-700 flex items-center justify-center mb-4">
+          <img id="image-preview" class="max-h-full max-w-full object-contain hidden" alt="Plant Preview" />
+          <div id="upload-placeholder" class="text-center p-4">
+            <svg class="mx-auto h-12 w-12 text-slate-500 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <p class="text-slate-400 text-sm">No photo uploaded yet</p>
+          </div>
+        </div>
+
+        <!-- Separate Action Buttons -->
+        <div class="flex flex-wrap justify-center gap-3 w-full">
+          
+          <!-- 1. Take Photo Button (Direct Camera) -->
+          <label class="cursor-pointer bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-2 rounded-lg transition text-xs md:text-sm flex items-center space-x-1.5 shadow-sm">
+            <span>📷 Take Photo</span>
+            <input type="file" id="camera-input" accept="image/*" capture="environment" onclick="this.value=null;" onchange="handleImageUpload(event)" class="hidden" />
+          </label>
+
+          <!-- 2. Choose from Gallery Button -->
+          <label class="cursor-pointer bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-lg transition text-xs md:text-sm flex items-center space-x-1.5 shadow-sm">
+            <span>🖼️ Gallery</span>
+            <input type="file" id="gallery-input" accept="image/*" onclick="this.value=null;" onchange="handleImageUpload(event)" class="hidden" />
+          </label>
+
+          <!-- 3. Clear Button -->
+          <button onclick="resetDashboard(true)" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-3 py-2 rounded-lg transition text-xs md:text-sm flex items-center shadow-sm">
+            🔄 Clear
+          </button>
+        </div>
+        
+        <p id="status-text" class="text-slate-400 text-xs mt-3 text-center">Take a photo or choose an image to analyze</p>
+      </div>
+
+      <!-- Detection Results -->
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+        <h2 class="text-lg font-semibold border-b border-slate-700 pb-2 mb-4">Detection Status</h2>
+        <div id="label-container" class="space-y-3">
+          <p class="text-slate-500 text-sm italic">Upload a photo to view detection status...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Confidence Summary Panel -->
+    <div id="summary-panel" class="bg-slate-800 border border-slate-700 rounded-xl p-6 flex items-center justify-between transition-all">
+      <div>
+        <h3 class="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Active Detection</h3>
+        <p id="detected-class-name" class="text-xl font-bold text-slate-300">No Target Detected</p>
+      </div>
+      <div class="text-right">
+        <h3 class="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Confidence Level</h3>
+        <p id="detected-confidence" class="text-3xl font-mono font-bold text-slate-500">0.0%</p>
+      </div>
+    </div>
+
+  </div>
+
+  <script type="text/javascript">
+    const URL = "https://teachablemachine.withgoogle.com/models/_mx1bEnhN/";
+
+    let model, maxPredictions;
+
+    // Load model automatically when page opens
+    async function loadModel() {
+      const modelURL = URL + "model.json";
+      const metadataURL = URL + "metadata.json";
+      model = await tmImage.load(modelURL, metadataURL);
+      maxPredictions = model.getTotalClasses();
+      document.getElementById("status-text").innerText = "Model loaded! Ready for photo upload.";
+      resetDashboard(true);
+    }
+
+    // Completely resets the UI for a fresh photo upload
+    function resetDashboard(clearImage = false) {
+      if (clearImage) {
+        const imgElement = document.getElementById("image-preview");
+        const placeholder = document.getElementById("upload-placeholder");
+        const cameraInput = document.getElementById("camera-input");
+        const galleryInput = document.getElementById("gallery-input");
+        
+        imgElement.src = "";
+        imgElement.classList.add("hidden");
+        placeholder.classList.remove("hidden");
+        cameraInput.value = "";
+        galleryInput.value = "";
+        document.getElementById("status-text").innerText = "Ready for photo upload.";
+      }
+
+      const labelContainer = document.getElementById("label-container");
+      labelContainer.innerHTML = "";
+      for (let i = 0; i < maxPredictions; i++) {
+        const item = document.createElement("div");
+        item.id = `status-item-${i}`;
+        item.className = "flex justify-between items-center p-3 rounded-lg bg-slate-700/50 border border-slate-700 transition-all";
+        item.innerHTML = `
+          <span id="class-name-${i}" class="font-medium text-slate-300">Class ${i + 1}</span>
+          <span id="class-status-${i}" class="text-xs font-semibold px-2.5 py-1 rounded bg-slate-800 text-slate-400">
+            Waiting for photo...
+          </span>
+        `;
+        labelContainer.appendChild(item);
+      }
+
+      // Reset bottom summary banner
+      const detectedNameEl = document.getElementById("detected-class-name");
+      const detectedConfEl = document.getElementById("detected-confidence");
+      const summaryPanel = document.getElementById("summary-panel");
+
+      detectedNameEl.innerText = "No Target Detected";
+      detectedNameEl.className = "text-xl font-bold text-slate-300";
+      detectedConfEl.innerText = "0.0%";
+      detectedConfEl.className = "text-3xl font-mono font-bold text-slate-500";
+      summaryPanel.className = "bg-slate-800 border border-slate-700 rounded-xl p-6 flex items-center justify-between transition-all";
+    }
+
+    // Triggered when user selects or takes a photo from either button
+    async function handleImageUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      // Reset text states before loading new image
+      resetDashboard(false);
+
+      const imgElement = document.getElementById("image-preview");
+      const placeholder = document.getElementById("upload-placeholder");
+      const statusText = document.getElementById("status-text");
+
+      statusText.innerText = "Analyzing photo...";
+
+      // Read and preview the new image
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        imgElement.src = e.target.result;
+        imgElement.classList.remove("hidden");
+        placeholder.classList.add("hidden");
+
+        // Run prediction
+        imgElement.onload = async function() {
+          await predict(imgElement);
+          statusText.innerText = "Analysis complete!";
+        };
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // Run prediction against the uploaded image
+    async function predict(imageElement) {
+      if (!model) return;
+
+      const prediction = await model.predict(imageElement);
+
+      let topDetectedClass = null;
+      let topConfidence = 0;
+
+      for (let i = 0; i < maxPredictions; i++) {
+        const className = prediction[i].className;
+        const probability = prediction[i].probability * 100;
+        
+        const nameElement = document.getElementById(`class-name-${i}`);
+        const statusElement = document.getElementById(`class-status-${i}`);
+        const containerItem = document.getElementById(`status-item-${i}`);
+
+        nameElement.innerText = className;
+
+        // 80% Threshold Check
+        if (probability >= 80) {
+          statusElement.innerText = "Detected";
+          
+          if (probability > topConfidence) {
+            topConfidence = probability;
+            topDetectedClass = className;
+          }
+
+          if (className.toLowerCase().includes("healthy")) {
+            statusElement.className = "text-xs font-bold px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+            containerItem.className = "flex justify-between items-center p-3 rounded-lg bg-emerald-950/20 border border-emerald-800/40 transition-all";
+          } else {
+            statusElement.className = "text-xs font-bold px-2.5 py-1 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30";
+            containerItem.className = "flex justify-between items-center p-3 rounded-lg bg-rose-950/20 border border-rose-800/40 transition-all";
+          }
+        } else {
+          statusElement.innerText = "Not Detected";
+          statusElement.className = "text-xs font-semibold px-2.5 py-1 rounded bg-slate-800 text-slate-400";
+          containerItem.className = "flex justify-between items-center p-3 rounded-lg bg-slate-700/30 border border-slate-700/50 transition-all";
+        }
+      }
+
+      // Update Bottom Summary Panel with NEW results
+      const detectedNameEl = document.getElementById("detected-class-name");
+      const detectedConfEl = document.getElementById("detected-confidence");
+      const summaryPanel = document.getElementById("summary-panel");
+
+      if (topDetectedClass) {
+        detectedNameEl.innerText = topDetectedClass;
+        detectedConfEl.innerText = `${topConfidence.toFixed(1)}%`;
+
+        if (topDetectedClass.toLowerCase().includes("healthy")) {
+          detectedNameEl.className = "text-xl font-bold text-emerald-400";
+          detectedConfEl.className = "text-3xl font-mono font-bold text-emerald-400";
+          summaryPanel.className = "bg-emerald-950/30 border border-emerald-800/50 rounded-xl p-6 flex items-center justify-between transition-all";
+        } else {
+          detectedNameEl.className = "text-xl font-bold text-rose-400";
+          detectedConfEl.className = "text-3xl font-mono font-bold text-rose-400";
+          summaryPanel.className = "bg-rose-950/30 border border-rose-800/50 rounded-xl p-6 flex items-center justify-between transition-all";
+        }
+      } else {
+        detectedNameEl.innerText = "No Target Detected (<80%)";
+        detectedNameEl.className = "text-xl font-bold text-slate-400";
+        detectedConfEl.innerText = "0.0%";
+        detectedConfEl.className = "text-3xl font-mono font-bold text-slate-500";
+        summaryPanel.className = "bg-slate-800 border border-slate-700 rounded-xl p-6 flex items-center justify-between transition-all";
+      }
+    }
+
+    // Initialize model on load
+    loadModel();
+  </script>
+</body>
+</html>
